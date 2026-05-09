@@ -1,0 +1,158 @@
+ 
+{% extends "base.html" %}
+{% block title %}Буккросинг — Каталог книг{% endblock %}
+{% block head %}
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="container">
+    <h1>📚 Знайди книгу поруч</h1>
+    <p>Обмінюйся книгами з учасниками буккросингу у твоєму місті</p>
+  </div>
+</div>
+
+<div class="container">
+  <!-- Пошук -->
+  <div class="search-bar">
+    <div class="form-group mb-1" style="flex:1; min-width:200px;">
+      <label class="form-label">Пошук за назвою, автором або жанром</label>
+      <input type="text" id="search-input" class="form-control" placeholder="Наприклад: Франко, фентезі, Шевченко...">
+    </div>
+    <div class="form-group mb-1" style="min-width:150px;">
+      <label class="form-label">Радіус пошуку (км)</label>
+      <input type="number" id="radius-input" class="form-control" value="10" min="1" max="100">
+    </div>
+    <button class="btn btn-primary" onclick="searchBooks()">🔍 Знайти</button>
+    <button class="btn btn-outline" onclick="useMyLocation()">📍 Поруч зі мною</button>
+    <button class="btn btn-secondary" onclick="loadAllBooks()">Всі книги</button>
+  </div>
+
+  <!-- Карта -->
+  <div id="map" class="mb-3"></div>
+
+  <!-- Список книг -->
+  <div class="section-title d-flex justify-between align-center">
+    <span>Доступні книги</span>
+    <span id="books-count" class="text-muted"></span>
+  </div>
+  <div id="books-container" class="grid-4"></div>
+  <div id="no-books" style="display:none;" class="text-center mt-3">
+    <p class="text-muted">📭 Книг не знайдено. Спробуйте змінити параметри пошуку.</p>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+let map, markers = [];
+let userLat = null, userLon = null;
+
+// Ініціалізація карти
+map = L.map('map').setView([49.8397, 24.0297], 12);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '© OpenStreetMap contributors'
+}).addTo(map);
+
+function clearMarkers() {
+  markers.forEach(m => map.removeLayer(m));
+  markers = [];
+}
+
+function addBookMarker(book) {
+  if (!book.location) return;
+  const { latitude, longitude } = book.location;
+  const marker = L.marker([latitude, longitude])
+    .addTo(map)
+    .bindPopup(`
+      <b>${book.title}</b><br>
+      ${book.author}<br>
+      <a href="/book/${book.id}" style="color:#4f6ef7;">Переглянути →</a>
+    `);
+  markers.push(marker);
+}
+
+function renderBooks(books) {
+  const container = document.getElementById('books-container');
+  const noBooks = document.getElementById('no-books');
+  const count = document.getElementById('books-count');
+
+  clearMarkers();
+  count.textContent = `Знайдено: ${books.length}`;
+
+  if (books.length === 0) {
+    container.innerHTML = '';
+    noBooks.style.display = 'block';
+    return;
+  }
+
+  noBooks.style.display = 'none';
+  container.innerHTML = books.map(book => `
+    <div class="card book-card" onclick="window.location.href='/book/${book.id}'">
+      <div class="card-img">
+        ${book.photo_url
+          ? `<img src="${book.photo_url}" style="width:100%;height:100%;object-fit:cover;">`
+          : '📖'}
+      </div>
+      <div class="card-body">
+        <div class="book-title">${book.title}</div>
+        <div class="book-author">${book.author}</div>
+        ${book.genre ? `<div class="text-muted mb-1">${book.genre}</div>` : ''}
+        ${getStatusBadge(book.status)}
+        ${book.location ? `<div class="book-location mt-1">📍 ${book.location.address || 'Місцезнаходження вказано'}</div>` : ''}
+      </div>
+    </div>
+  `).join('');
+
+  books.forEach(addBookMarker);
+
+  if (books.length > 0 && books[0].location) {
+    map.setView([books[0].location.latitude, books[0].location.longitude], 12);
+  }
+}
+
+async function loadAllBooks() {
+  const res = await apiGet('/books/', false);
+  if (res && res.ok) {
+    const books = await res.json();
+    renderBooks(books);
+  }
+}
+
+async function searchBooks() {
+  const search = document.getElementById('search-input').value;
+  const radius = document.getElementById('radius-input').value;
+
+  let url = '/books/?';
+  if (search) url += `search=${encodeURIComponent(search)}&`;
+  if (userLat && userLon) url += `lat=${userLat}&lon=${userLon}&radius=${radius}`;
+
+  const res = await apiGet(url, false);
+  if (res && res.ok) {
+    const books = await res.json();
+    renderBooks(books);
+  }
+}
+
+function useMyLocation() {
+  if (!navigator.geolocation) {
+    alert('Геолокація не підтримується вашим браузером');
+    return;
+  }
+  navigator.geolocation.getCurrentPosition(pos => {
+    userLat = pos.coords.latitude;
+    userLon = pos.coords.longitude;
+    map.setView([userLat, userLon], 13);
+    L.marker([userLat, userLon], {
+      icon: L.divIcon({ className: '', html: '<div style="background:#4f6ef7;width:16px;height:16px;border-radius:50%;border:3px solid white;box-shadow:0 0 6px rgba(0,0,0,0.3);"></div>' })
+    }).addTo(map).bindPopup('Ви тут').openPopup();
+    searchBooks();
+  }, () => alert('Не вдалось отримати геолокацію'));
+}
+
+// Завантажити всі книги при старті
+loadAllBooks();
+</script>
+{% endblock %}

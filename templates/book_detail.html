@@ -1,0 +1,216 @@
+ {% extends "base.html" %}
+{% block title %}Книга — Буккросинг{% endblock %}
+{% block head %}
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+{% endblock %}
+{% block content %}
+<div class="container" style="max-width:900px; padding-top:2rem;">
+  <div id="book-container">
+    <div class="spinner"></div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const bookId = {{ book_id }};
+let map = null;
+let currentBook = null;
+
+async function loadBook() {
+  const res = await apiGet(`/books/${bookId}`, false);
+  if (!res || !res.ok) {
+    document.getElementById('book-container').innerHTML = '<p class="text-center text-muted">Книгу не знайдено</p>';
+    return;
+  }
+
+  currentBook = await res.json();
+  const user = getUser();
+  const isOwner = user && user.id === currentBook.owner_id;
+
+  document.getElementById('book-container').innerHTML = `
+    <div class="grid-2" style="gap:2rem;">
+      <div>
+        <div class="card-img" style="height:350px; border-radius:12px; overflow:hidden; box-shadow:0 4px 20px rgba(0,0,0,0.1);">
+          ${currentBook.photo_url
+            ? `<img src="${currentBook.photo_url}" style="width:100%;height:100%;object-fit:cover;">`
+            : '<div style="background:#e9ecef;width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:5rem;">📖</div>'}
+        </div>
+      </div>
+
+      <div>
+        <h1 style="font-size:1.8rem;font-weight:700;margin-bottom:0.5rem;">${currentBook.title}</h1>
+        <p style="font-size:1.1rem;color:#666;margin-bottom:1rem;">${currentBook.author}</p>
+
+        <div class="d-flex gap-1 flex-wrap mb-2">
+          ${getStatusBadge(currentBook.status)}
+          ${currentBook.genre ? `<span class="badge badge-secondary">${currentBook.genre}</span>` : ''}
+        </div>
+
+        ${currentBook.description ? `<p style="color:#555;line-height:1.6;margin-bottom:1rem;">${currentBook.description}</p>` : ''}
+
+        ${currentBook.location ? `
+          <p class="text-muted mb-2">📍 ${currentBook.location.address || 'Координати вказані'}</p>
+        ` : ''}
+
+        <p class="text-muted mb-3">📅 Додано: ${formatDate(currentBook.added_at)}</p>
+
+        <div id="action-buttons">
+          ${isOwner ? `
+            <button class="btn btn-danger btn-sm" onclick="deleteBook()">🗑 Видалити</button>
+          ` : currentBook.status === 'available' && isLoggedIn() ? `
+            <button class="btn btn-primary" onclick="requestExchange()">🔄 Запросити обмін</button>
+          ` : !isLoggedIn() ? `
+            <a href="/login" class="btn btn-outline">Увійдіть щоб запросити обмін</a>
+          ` : `
+            <p class="text-muted">Книга недоступна для обміну</p>
+          `}
+        </div>
+      </div>
+    </div>
+
+    <div id="request-form" style="display:none;" class="card mt-3">
+      <div class="card-body">
+        <h3 class="mb-2">Запит на обмін</h3>
+        <div class="form-group">
+          <label class="form-label">Коментар (необов'язково)</label>
+          <textarea id="exchange-comment" class="form-control" rows="2" placeholder="Напишіть повідомлення власнику..."></textarea>
+        </div>
+        <div class="d-flex gap-1">
+          <button class="btn btn-primary" onclick="submitExchange()">Надіслати запит</button>
+          <button class="btn btn-secondary" onclick="cancelRequest()">Скасувати</button>
+        </div>
+        <div id="exchange-alert"></div>
+      </div>
+    </div>
+
+    ${currentBook.location ? `
+      <div class="mt-3">
+        <h3 class="section-title">📍 Місцезнаходження</h3>
+        <div id="map"></div>
+      </div>
+    ` : ''}
+
+    <div class="mt-3">
+      <h3 class="section-title">💬 Відгуки</h3>
+      <div id="reviews-container"></div>
+      ${isLoggedIn() ? `
+        <div class="card mt-2">
+          <div class="card-body">
+            <h4 class="mb-2">Залишити відгук</h4>
+            <div class="form-group">
+              <label class="form-label">Оцінка (1-5)</label>
+              <input type="number" id="rating" class="form-control" min="1" max="5" value="5" style="width:100px;">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Текст відгуку</label>
+              <textarea id="review-text" class="form-control" rows="2" placeholder="Ваш відгук..."></textarea>
+            </div>
+            <button class="btn btn-primary btn-sm" onclick="submitReview()">Надіслати відгук</button>
+            <div id="review-alert"></div>
+          </div>
+        </div>
+      ` : ''}
+    </div>
+  `;
+
+  // Карта
+  if (currentBook.location) {
+    setTimeout(() => {
+      const { latitude, longitude } = currentBook.location;
+      map = L.map('map').setView([latitude, longitude], 15);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap'
+      }).addTo(map);
+      L.marker([latitude, longitude]).addTo(map)
+        .bindPopup(`<b>${currentBook.title}</b>`).openPopup();
+    }, 100);
+  }
+
+  loadReviews();
+}
+
+function requestExchange() {
+  document.getElementById('request-form').style.display = 'block';
+  document.getElementById('action-buttons').style.display = 'none';
+}
+
+function cancelRequest() {
+  document.getElementById('request-form').style.display = 'none';
+  document.getElementById('action-buttons').style.display = 'block';
+}
+
+async function submitExchange() {
+  const comment = document.getElementById('exchange-comment').value.trim();
+  const body = { book_id: bookId };
+  if (comment) body.comment = comment;
+
+  const res = await apiPost('/exchanges/', body);
+  if (!res) return;
+
+  if (res.ok) {
+    showAlert('exchange-alert', 'Запит успішно надіслано!', 'success');
+    setTimeout(() => window.location.href = '/exchanges', 1500);
+  } else {
+    const err = await res.json();
+    showAlert('exchange-alert', err.detail || 'Помилка');
+  }
+}
+
+async function deleteBook() {
+  if (!confirm('Видалити цю книгу?')) return;
+  const res = await apiDelete(`/books/${bookId}`);
+  if (res && (res.ok || res.status === 204)) {
+    window.location.href = '/profile';
+  }
+}
+
+async function loadReviews() {
+  const res = await apiGet(`/reviews/book/${bookId}`, false);
+  const container = document.getElementById('reviews-container');
+  if (!res || !res.ok) return;
+
+  const reviews = await res.json();
+  if (reviews.length === 0) {
+    container.innerHTML = '<p class="text-muted">Відгуків ще немає</p>';
+    return;
+  }
+
+  container.innerHTML = reviews.map(r => `
+    <div class="card mb-2">
+      <div class="card-body">
+        <div class="d-flex justify-between align-center mb-1">
+          <strong>${'⭐'.repeat(r.rating)}</strong>
+          <span class="text-muted">${formatDate(r.created_at)}</span>
+        </div>
+        ${r.text ? `<p>${r.text}</p>` : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+async function submitReview() {
+  const rating = parseInt(document.getElementById('rating').value);
+  const text = document.getElementById('review-text').value.trim();
+
+  if (!rating || rating < 1 || rating > 5) {
+    showAlert('review-alert', 'Оцінка від 1 до 5');
+    return;
+  }
+
+  const body = { book_id: bookId, rating };
+  if (text) body.text = text;
+
+  const res = await apiPost('/reviews/', body);
+  if (res && res.ok) {
+    showAlert('review-alert', 'Відгук додано!', 'success');
+    loadReviews();
+  } else if (res) {
+    const err = await res.json();
+    showAlert('review-alert', err.detail || 'Помилка');
+  }
+}
+
+loadBook();
+</script>
+{% endblock %}

@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Буккросинг{% endblock %}</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  {% block head %}{% endblock %}
+</head>
+<body>
+
+<nav class="navbar">
+  <a href="/" class="navbar-brand">📚 <span>Буккросинг</span></a>
+  <ul class="navbar-nav">
+    <li><a href="/">Каталог</a></li>
+    <li id="nav-auth" style="display:flex; gap:0.5rem;">
+      <a href="/login" class="btn btn-outline btn-sm">Увійти</a>
+      <a href="/register" class="btn btn-primary btn-sm">Реєстрація</a>
+    </li>
+    <li id="nav-user" style="display:none; align-items:center; gap:1rem;">
+      <a href="/add-book" class="btn btn-primary btn-sm">+ Додати книгу</a>
+      <a href="/exchanges">Обміни</a>
+      <a href="/profile" style="position:relative;">
+        👤 <span id="nav-username"></span>
+        <span id="notif-badge" class="notif-badge" style="display:none;">0</span>
+      </a>
+      <a href="#" onclick="logout()" class="btn btn-sm btn-secondary">Вийти</a>
+    </li>
+  </ul>
+</nav>
+
+{% block content %}{% endblock %}
+
+<script src="/static/js/api.js"></script>
+{% block scripts %}{% endblock %}
+<script>
+  updateNavbar();
+  function logout() {
+    removeToken();
+    window.location.href = '/';
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,82 @@
+ {% extends "base.html" %}
+{% block title %}Реєстрація — Буккросинг{% endblock %}
+{% block content %}
+<div class="auth-container">
+  <div class="auth-card">
+    <h2>📚 Реєстрація</h2>
+    <div id="alert-container"></div>
+    <div class="form-group">
+      <label class="form-label">Ім'я</label>
+      <input type="text" id="name" class="form-control" placeholder="Ваше ім'я">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Email</label>
+      <input type="email" id="email" class="form-control" placeholder="your@email.com">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Пароль</label>
+      <input type="password" id="password" class="form-control" placeholder="Мінімум 6 символів">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Підтвердження пароля</label>
+      <input type="password" id="password2" class="form-control" placeholder="Повторіть пароль">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Місто (необов'язково)</label>
+      <input type="text" id="city" class="form-control" placeholder="Наприклад: Львів">
+    </div>
+    <button class="btn btn-primary w-100 mt-2" onclick="register()">Зареєструватись</button>
+    <p class="text-center mt-2 text-muted">
+      Вже є акаунт? <a href="/login" style="color:#4f6ef7;">Увійти</a>
+    </p>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function register() {
+  const name = document.getElementById('name').value.trim();
+  const email = document.getElementById('email').value.trim();
+  const password = document.getElementById('password').value;
+  const password2 = document.getElementById('password2').value;
+  const city = document.getElementById('city').value.trim();
+
+  if (!name || !email || !password) {
+    showAlert('alert-container', 'Заповніть всі обов\'язкові поля');
+    return;
+  }
+  if (password !== password2) {
+    showAlert('alert-container', 'Паролі не збігаються');
+    return;
+  }
+  if (password.length < 6) {
+    showAlert('alert-container', 'Пароль має бути мінімум 6 символів');
+    return;
+  }
+
+  const body = { name, email, password };
+  if (city) body.city = city;
+
+  const res = await apiPost('/auth/register', body, false);
+  if (!res) return;
+
+  if (res.ok) {
+    showAlert('alert-container', 'Реєстрація успішна! Входимо...', 'success');
+    // Автологін
+    const loginRes = await apiPost('/auth/login', { email, password }, false);
+    if (loginRes && loginRes.ok) {
+      const data = await loginRes.json();
+      setToken(data.access_token);
+      const profileRes = await apiGet('/users/me');
+      if (profileRes && profileRes.ok) setUser(await profileRes.json());
+    }
+    setTimeout(() => window.location.href = '/', 1000);
+  } else {
+    const err = await res.json();
+    showAlert('alert-container', err.detail || 'Помилка реєстрації');
+  }
+}
+
+if (isLoggedIn()) window.location.href = '/';
+</script>
+{% endblock %}

@@ -1,0 +1,99 @@
+ {% extends "base.html" %}
+{% block title %}Обміни — Буккросинг{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div class="container">
+    <h1>🔄 Мої обміни</h1>
+    <p>Управляйте запитами на обмін книгами</p>
+  </div>
+</div>
+
+<div class="container">
+  <div class="tabs">
+    <button class="tab-btn active" onclick="switchTab('incoming', this)">📥 Вхідні запити</button>
+    <button class="tab-btn" onclick="switchTab('outgoing', this)">📤 Мої запити</button>
+  </div>
+
+  <div id="tab-incoming">
+    <div id="incoming-container"></div>
+  </div>
+
+  <div id="tab-outgoing" style="display:none;">
+    <div id="outgoing-container"></div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+if (!isLoggedIn()) window.location.href = '/login';
+
+const user = getUser();
+
+function switchTab(tab, btn) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('tab-incoming').style.display = tab === 'incoming' ? 'block' : 'none';
+  document.getElementById('tab-outgoing').style.display = tab === 'outgoing' ? 'block' : 'none';
+}
+
+async function loadExchanges() {
+  const res = await apiGet('/exchanges/my');
+  if (!res || !res.ok) return;
+
+  const all = await res.json();
+  const incoming = all.filter(e => e.owner_id === user.id);
+  const outgoing = all.filter(e => e.sender_id === user.id);
+
+  renderExchanges('incoming-container', incoming, true);
+  renderExchanges('outgoing-container', outgoing, false);
+}
+
+function renderExchanges(containerId, exchanges, isOwner) {
+  const container = document.getElementById(containerId);
+
+  if (exchanges.length === 0) {
+    container.innerHTML = '<p class="text-muted mt-2">Немає запитів</p>';
+    return;
+  }
+
+  container.innerHTML = exchanges.map(e => `
+    <div class="exchange-item">
+      <div>
+        <p><strong>Книга #${e.book_id}</strong> — <a href="/book/${e.book_id}" style="color:#4f6ef7;">Переглянути</a></p>
+        ${e.comment ? `<p class="text-muted">"${e.comment}"</p>` : ''}
+        <p class="text-muted">📅 ${formatDate(e.created_at)}</p>
+      </div>
+      <div class="d-flex gap-1 align-center flex-wrap">
+        ${getStatusBadge(e.status)}
+        ${isOwner && e.status === 'pending' ? `
+          <button class="btn btn-success btn-sm" onclick="approveExchange(${e.id})">✓ Схвалити</button>
+          <button class="btn btn-danger btn-sm" onclick="rejectExchange(${e.id})">✗ Відхилити</button>
+        ` : ''}
+        ${!isOwner && e.status === 'approved' ? `
+          <button class="btn btn-primary btn-sm" onclick="completeExchange(${e.id})">✓ Підтвердити отримання</button>
+        ` : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+async function approveExchange(id) {
+  const res = await apiPatch(`/exchanges/${id}/approve`);
+  if (res && res.ok) loadExchanges();
+}
+
+async function rejectExchange(id) {
+  if (!confirm('Відхилити запит?')) return;
+  const res = await apiPatch(`/exchanges/${id}/reject`);
+  if (res && res.ok) loadExchanges();
+}
+
+async function completeExchange(id) {
+  if (!confirm('Підтвердити отримання книги?')) return;
+  const res = await apiPatch(`/exchanges/${id}/complete`);
+  if (res && res.ok) loadExchanges();
+}
+
+loadExchanges();
+</script>
+{% endblock %}
